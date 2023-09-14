@@ -123,7 +123,6 @@ trainer = Trainer(
     gradient_accumulate_every=2,  # gradient accumulation steps
     ema_decay=0.995,  # exponential moving average decay
     results_folder=args.save_folder,
-    load_path=args.load_path,
 )
 
 trainer.train()
