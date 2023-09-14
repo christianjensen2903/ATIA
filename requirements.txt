@@ -1,0 +1,9 @@
+einops==0.6.1
+torchgeometry==0.1.2
+torch==2.0.0
+torchvision==0.15.1
+tqdm==4.66.1
+numpy==1.24.2
+apex==0.9.10.dev0
+imageio==2.31.3
+pytorch_msssim==1.0.0
