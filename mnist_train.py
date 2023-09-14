@@ -50,10 +50,10 @@ parser.add_argument(
     help="This is the number of steps in which a clean image looses information.",
 )
 parser.add_argument(
-    "--train_steps",
-    default=700000,
+    "--epochs",
+    default=100,
     type=int,
-    help="The number of iterations for training.",
+    help="The number of epochs for training.",
 )
 parser.add_argument(
     "--blur_std",
@@ -119,7 +119,7 @@ trainer = Trainer(
     image_size=32,
     train_batch_size=32,
     train_lr=2e-5,
-    train_num_steps=args.train_steps,  # total training steps
+    epochs=args.train_steps,  # total training steps
     gradient_accumulate_every=2,  # gradient accumulation steps
     ema_decay=0.995,  # exponential moving average decay
     results_folder=args.save_folder,

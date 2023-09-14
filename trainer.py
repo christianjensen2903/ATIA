@@ -78,11 +78,11 @@ class Trainer(object):
         image_size=128,
         train_batch_size=32,
         train_lr=2e-5,
-        train_num_steps=100000,
+        epochs=100000,
         gradient_accumulate_every=2,
         step_start_ema=2000,
         update_ema_every=10,
-        save_and_sample_every=1000,
+        save_and_sample_every=10,
         results_folder="./results",
         shuffle=True,
     ):
@@ -98,18 +98,16 @@ class Trainer(object):
         self.batch_size = train_batch_size
         self.image_size = image_size
         self.gradient_accumulate_every = gradient_accumulate_every
-        self.train_num_steps = train_num_steps
+        self.epochs = epochs
 
         self.ds = Dataset_Aug1(folder, image_size)
-        self.dl = cycle(
-            data.DataLoader(
-                self.ds,
-                batch_size=train_batch_size,
-                shuffle=shuffle,
-                pin_memory=True,
-                num_workers=8,
-                drop_last=True,
-            )
+        self.train_dataloader = data.DataLoader(
+            self.ds,
+            batch_size=train_batch_size,
+            shuffle=shuffle,
+            pin_memory=True,
+            num_workers=8,
+            drop_last=True,
         )
 
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
@@ -134,21 +132,15 @@ class Trainer(object):
         else:
             torch.save(data, str(self.results_folder / f"model_{itrs}.pt"))
 
-    def step_ema(self):
-        if self.step < self.step_start_ema:
-            self.reset_parameters()
-            return
-        self.ema.update_model_average(self.ema_model, self.model)
-
     def train(self):
         acc_loss = 0
-        while self.step < self.train_num_steps:
+        for epoch in range(self.epochs):
             u_loss = 0
-            for i in range(self.gradient_accumulate_every):
-                data = next(self.dl).cuda()
+            for _ in range(self.gradient_accumulate_every):
+                data = next(self.train_dataloader).cuda()
                 loss = torch.mean(self.model(data))  # change for DP
-                if self.step % 100 == 0:
-                    print(f"{self.step}: {loss.item()}")
+                if epoch % 100 == 0:
+                    print(f"{epoch}: {loss.item()}")
                 u_loss += loss.item()
 
                 # loss backward
@@ -160,13 +152,13 @@ class Trainer(object):
             self.opt.step()
             self.opt.zero_grad()
 
-            if self.step % self.update_ema_every == 0:
-                self.step_ema()
+            if epoch % self.update_ema_every == 0:
+                self.ema.update_model_average(self.ema_model, self.model)
 
-            if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                milestone = self.step // self.save_and_sample_every
+            if epoch != 0 and epoch % self.save_and_sample_every == 0:
+                milestone = epoch // self.save_and_sample_every
                 batches = self.batch_size
-                og_img = next(self.dl).cuda()
+                og_img = next(self.train_dataloader).cuda()
                 xt, direct_recons, all_images = self.ema_model.module.sample(
                     batch_size=batches, img=og_img
                 )  # change for DP
@@ -198,13 +190,11 @@ class Trainer(object):
                 )
 
                 acc_loss = acc_loss / (self.save_and_sample_every + 1)
-                print(f"Mean of last {self.step}: {acc_loss}")
+                print(f"Mean of last {epoch}: {acc_loss}")
                 acc_loss = 0
 
                 self.save()
-                if self.step % (self.save_and_sample_every * 100) == 0:
-                    self.save(self.step)
-
-            self.step += 1
+                if epoch % (self.save_and_sample_every * 100) == 0:
+                    self.save(epoch)
 
         print("training completed")
