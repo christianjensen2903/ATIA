@@ -18,7 +18,6 @@ import imageio
 from pytorch_msssim import ssim
 from collections import OrderedDict
 from PIL import Image
-from apex import amp
 
 
 def create_folder(path):
@@ -60,14 +59,6 @@ def cycle_cat(dl):
     while True:
         for data in dl:
             yield data[0]
-
-
-def loss_backwards(fp16, loss, optimizer, **kwargs):
-    if fp16:
-        with amp.scale_loss(loss, optimizer) as scaled_loss:
-            scaled_loss.backward(**kwargs)
-    else:
-        loss.backward(**kwargs)
 
 
 class Dataset_Aug1(data.Dataset):
@@ -151,13 +142,11 @@ class Trainer(object):
         train_lr=2e-5,
         train_num_steps=100000,
         gradient_accumulate_every=2,
-        fp16=False,
         step_start_ema=2000,
         update_ema_every=10,
         save_and_sample_every=1000,
         results_folder="./results",
         load_path=None,
-        dataset=None,
         shuffle=True,
     ):
         super().__init__()
@@ -174,71 +163,23 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
-        if (
-            dataset == "mnist"
-            or dataset == "cifar10"
-            or dataset == "flower"
-            or dataset == "celebA"
-            or dataset == "AFHQ"
-        ):
-            print(dataset, "DA used")
-            self.ds = Dataset_Aug1(folder, image_size)
-            self.dl = cycle(
-                data.DataLoader(
-                    self.ds,
-                    batch_size=train_batch_size,
-                    shuffle=shuffle,
-                    pin_memory=True,
-                    num_workers=8,
-                    drop_last=True,
-                )
+        self.ds = Dataset_Aug1(folder, image_size)
+        self.dl = cycle(
+            data.DataLoader(
+                self.ds,
+                batch_size=train_batch_size,
+                shuffle=shuffle,
+                pin_memory=True,
+                num_workers=8,
+                drop_last=True,
             )
-
-        elif dataset == "LSUN_train":
-            print(dataset, "DA used")
-            transform = transforms.Compose(
-                [
-                    transforms.Resize((int(image_size * 1.12), int(image_size * 1.12))),
-                    transforms.RandomCrop(image_size),
-                    transforms.ToTensor(),
-                    transforms.Lambda(lambda t: (t * 2) - 1),
-                ]
-            )
-            self.ds = torchvision.datasets.LSUN(
-                root=folder, classes=["church_outdoor_train"], transform=transform
-            )
-            self.dl = cycle_cat(
-                data.DataLoader(
-                    self.ds,
-                    batch_size=train_batch_size,
-                    shuffle=shuffle,
-                    pin_memory=True,
-                    num_workers=16,
-                    drop_last=True,
-                )
-            )
-
-        else:
-            print(dataset)
-            self.ds = Dataset(folder, image_size)
-            self.dl = cycle(
-                data.DataLoader(
-                    self.ds,
-                    batch_size=train_batch_size,
-                    shuffle=shuffle,
-                    pin_memory=True,
-                    num_workers=16,
-                    drop_last=True,
-                )
-            )
+        )
 
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
         self.step = 0
 
         self.results_folder = Path(results_folder)
         self.results_folder.mkdir(exist_ok=True)
-
-        self.fp16 = fp16
 
         self.reset_parameters()
 
@@ -305,8 +246,6 @@ class Trainer(object):
         cv2.imwrite(path, vcat)
 
     def train(self):
-        backwards = partial(loss_backwards, self.fp16)
-
         acc_loss = 0
         while self.step < self.train_num_steps:
             u_loss = 0
@@ -316,7 +255,10 @@ class Trainer(object):
                 if self.step % 100 == 0:
                     print(f"{self.step}: {loss.item()}")
                 u_loss += loss.item()
-                backwards(loss / self.gradient_accumulate_every, self.opt)
+
+                # loss backward
+                loss = loss / self.gradient_accumulate_every
+                loss.backward()
 
             acc_loss = acc_loss + (u_loss / self.gradient_accumulate_every)
 
