@@ -4,5 +4,3 @@ torch==2.0.0
 torchvision==0.15.1
 tqdm==4.66.1
 numpy==1.24.2
-imageio==2.31.3
-pytorch_msssim==1.0.0
