@@ -178,3 +178,68 @@ class GaussianDiffusion(nn.Module):
         ), f"height and width of image must be {img_size}"
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         return self.p_losses(x, t, *args, **kwargs)
+
+    @torch.no_grad()
+    def sample(self, batch_size=16, img=None, t=None):
+        self.denoise_fn.eval()
+
+        if t == None:
+            t = self.num_timesteps
+
+        if self.blur_routine == "Individual_Incremental":
+            img = self.gaussian_kernels[t - 1](img)
+
+        else:
+            for i in range(t):
+                with torch.no_grad():
+                    img = self.gaussian_kernels[i](img)
+
+        temp = img
+        if self.discrete:
+            img = torch.mean(img, [2, 3], keepdim=True)
+            img = img.expand(temp.shape[0], temp.shape[1], temp.shape[2], temp.shape[3])
+
+        # 3(2), 2(1), 1(0)
+        xt = img
+        direct_recons = None
+        while t:
+            step = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
+            x = self.denoise_fn(img, step)
+
+            if self.train_routine == "Final":
+                if direct_recons == None:
+                    direct_recons = x
+
+                if self.sampling_routine == "default":
+                    if self.blur_routine == "Individual_Incremental":
+                        x = self.gaussian_kernels[t - 2](x)
+                    else:
+                        for i in range(t - 1):
+                            with torch.no_grad():
+                                x = self.gaussian_kernels[i](x)
+
+                elif self.sampling_routine == "x0_step_down":
+                    x_times = x
+                    for i in range(t):
+                        with torch.no_grad():
+                            x_times = self.gaussian_kernels[i](x_times)
+                            if self.discrete:
+                                if i == (self.num_timesteps - 1):
+                                    x_times = torch.mean(x_times, [2, 3], keepdim=True)
+                                    x_times = x_times.expand(
+                                        temp.shape[0],
+                                        temp.shape[1],
+                                        temp.shape[2],
+                                        temp.shape[3],
+                                    )
+
+                    x_times_sub_1 = x
+                    for i in range(t - 1):
+                        with torch.no_grad():
+                            x_times_sub_1 = self.gaussian_kernels[i](x_times_sub_1)
+
+                    x = img - x_times + x_times_sub_1
+            img = x
+            t = t - 1
+        self.denoise_fn.train()
+        return xt, direct_recons, img

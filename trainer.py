@@ -101,13 +101,15 @@ class Trainer(object):
         self.epochs = epochs
 
         self.ds = Dataset_Aug1(folder, image_size)
-        self.train_dataloader = data.DataLoader(
-            self.ds,
-            batch_size=train_batch_size,
-            shuffle=shuffle,
-            pin_memory=True,
-            num_workers=8,
-            drop_last=True,
+        self.train_dataloader = cycle(
+            data.DataLoader(
+                self.ds,
+                batch_size=train_batch_size,
+                shuffle=shuffle,
+                pin_memory=True,
+                num_workers=8,
+                drop_last=True,
+            )
         )
 
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
